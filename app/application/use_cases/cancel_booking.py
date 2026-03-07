@@ -9,10 +9,12 @@ from app.domain.repositories.booking_repository import BookingRepository
 class CancelBooking:
     booking_repository: BookingRepository
 
-    def execute(self, booking_id: UUID) -> None:
+    def execute(self, tenant_id: str, booking_id: UUID) -> None:
         booking = self.booking_repository.get_by_id(booking_id)
 
         if booking is None:
+            raise NotFoundError("Booking not found")
+        if booking.tenant_id != tenant_id:
             raise NotFoundError("Booking not found")
 
         booking.cancel()

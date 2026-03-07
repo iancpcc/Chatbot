@@ -9,3 +9,7 @@ class ServiceRepository(ABC):
     @abstractmethod
     def get(self, tenant_id: str, service_id: UUID) -> Optional[Service]:
         pass
+
+    @abstractmethod
+    def save(self, tenant_id: str, service: Service) -> None:
+        pass

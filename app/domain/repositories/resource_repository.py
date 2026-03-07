@@ -9,3 +9,7 @@ class ResourceRepository(ABC):
     @abstractmethod
     def get(self, tenant_id: str, resource_id: UUID) -> Optional[Resource]:
         pass
+
+    @abstractmethod
+    def save(self, tenant_id: str, resource: Resource) -> None:
+        pass

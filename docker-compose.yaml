@@ -9,12 +9,21 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
+      - postgres
     volumes:
       - .:/app
 
-  redis:
-    image: redis:7-alpine
-    container_name: booking_engine_redis
+  postgres:
+    image: postgres:16-alpine
+    container_name: booking_engine_postgres
+    environment:
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot
+      POSTGRES_DB: chatbot
     ports:
-      - "6379:6379"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

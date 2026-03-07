@@ -16,3 +16,7 @@ class ConflictError(DomainError):
 
 class BusinessRuleError(DomainError):
     pass
+
+
+class InfrastructureError(DomainError):
+    """Raised when an external dependency/config prevents completing a request."""

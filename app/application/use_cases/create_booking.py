@@ -5,7 +5,7 @@ from app.application.dto.create_booking_dto import (
     CreateBookingRequest,
     CreateBookingResponse,
 )
-from app.domain.exceptions import NotFoundError
+from app.domain.exceptions import NotFoundError, ValidationError
 from app.domain.entities.booking import Booking
 from app.domain.entities.customer import Customer
 from app.domain.value_objects.time_slot import TimeSlot
@@ -39,6 +39,11 @@ class CreateBooking:
         )
 
         time_slot = TimeSlot(start=request.start, end=request.end)
+        requested_minutes = int((time_slot.end - time_slot.start).total_seconds() / 60)
+        if requested_minutes != service.duration_minutes:
+            raise ValidationError(
+                "Requested slot duration must match service duration_minutes"
+            )
 
         existing_bookings = self.booking_repository.get_by_resource(
             tenant_id=request.tenant_id,

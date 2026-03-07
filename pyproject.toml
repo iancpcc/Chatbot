@@ -8,6 +8,7 @@ dependencies = [
     "alembic>=1.18.4",
     "fastapi>=0.133.1",
     "openai>=2.24.0",
+    "psycopg[binary]>=3.2.12",
     "pydantic>=2.12.5",
     "redis>=7.2.1",
     "sqlalchemy>=2.0.47",
@@ -25,5 +26,4 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-
 

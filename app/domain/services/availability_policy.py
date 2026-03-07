@@ -14,7 +14,7 @@ class AvailabilityPolicy:
     ) -> None:
 
         for booking in existing_bookings:
-            if booking.status == BookingStatus.CANCELLED:
+            if booking.status in (BookingStatus.CANCELLED, BookingStatus.COMPLETED):
                 continue
 
             if booking.time_slot.overlaps(requested_slot):

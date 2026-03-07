@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List
 from uuid import UUID
 from typing import Optional
@@ -22,3 +23,21 @@ class InMemoryBookingRepository(BookingRepository):
             for b in self._storage.values()
             if b.tenant_id == tenant_id and b.resource.id == resource_id
         ]
+
+    def list(
+        self,
+        tenant_id: str,
+        resource_id: UUID | None = None,
+        start_from: datetime | None = None,
+        end_to: datetime | None = None,
+    ) -> List[Booking]:
+        results = [b for b in self._storage.values() if b.tenant_id == tenant_id]
+
+        if resource_id is not None:
+            results = [b for b in results if b.resource.id == resource_id]
+        if start_from is not None:
+            results = [b for b in results if b.time_slot.start >= start_from]
+        if end_to is not None:
+            results = [b for b in results if b.time_slot.end <= end_to]
+
+        return sorted(results, key=lambda booking: booking.time_slot.start)

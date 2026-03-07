@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List
 from uuid import UUID
 from typing import Optional
@@ -16,4 +17,14 @@ class BookingRepository(ABC):
 
     @abstractmethod
     def get_by_resource(self, tenant_id: str, resource_id: UUID) -> List[Booking]:
+        pass
+
+    @abstractmethod
+    def list(
+        self,
+        tenant_id: str,
+        resource_id: UUID | None = None,
+        start_from: datetime | None = None,
+        end_to: datetime | None = None,
+    ) -> List[Booking]:
         pass
