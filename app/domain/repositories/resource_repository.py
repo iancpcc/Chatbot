@@ -13,3 +13,7 @@ class ResourceRepository(ABC):
     @abstractmethod
     def save(self, tenant_id: str, resource: Resource) -> None:
         pass
+
+    @abstractmethod
+    def list(self, tenant_id: str) -> list[Resource]:
+        pass

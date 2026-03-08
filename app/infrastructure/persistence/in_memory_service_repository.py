@@ -14,3 +14,8 @@ class InMemoryServiceRepository(ServiceRepository):
 
     def save(self, tenant_id: str, service: Service) -> None:
         self._storage[(tenant_id, service.id)] = service
+
+    def list(self, tenant_id: str) -> list[Service]:
+        # Stable order makes HTTP responses predictable and easier to test.
+        services = [s for (t_id, _), s in self._storage.items() if t_id == tenant_id]
+        return sorted(services, key=lambda s: (s.name.lower(), str(s.id)))

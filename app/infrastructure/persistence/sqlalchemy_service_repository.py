@@ -42,3 +42,21 @@ class SqlAlchemyServiceRepository(ServiceRepository):
                 row.duration_minutes = service.duration_minutes
                 row.price = service.price
             session.commit()
+
+    def list(self, tenant_id: str) -> list[Service]:
+        with SessionLocal() as session:
+            stmt = (
+                select(ServiceModel)
+                .where(ServiceModel.tenant_id == tenant_id)
+                .order_by(ServiceModel.name.asc(), ServiceModel.id.asc())
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [
+                Service(
+                    id=UUID(row.id),
+                    name=row.name,
+                    duration_minutes=row.duration_minutes,
+                    price=row.price,
+                )
+                for row in rows
+            ]

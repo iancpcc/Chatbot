@@ -36,3 +36,13 @@ class SqlAlchemyResourceRepository(ResourceRepository):
             else:
                 row.name = resource.name
             session.commit()
+
+    def list(self, tenant_id: str) -> list[Resource]:
+        with SessionLocal() as session:
+            stmt = (
+                select(ResourceModel)
+                .where(ResourceModel.tenant_id == tenant_id)
+                .order_by(ResourceModel.name.asc(), ResourceModel.id.asc())
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [Resource(id=UUID(row.id), name=row.name) for row in rows]

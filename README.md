@@ -6,7 +6,7 @@ Versión actual de endpoints: `/v1`.
 ## Ejecutar
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn app.main:app --reload
+make run
 ```
 
 ## Atajos (estilo scripts)
@@ -17,6 +17,68 @@ make test
 make lint
 make typecheck
 make check
+```
+
+## Configuracion
+
+Variables principales (ver `.env.example`):
+
+- `APP_ENV=dev|staging|prod` selecciona el provider de LLM (dev->Ollama, staging->Groq, prod->OpenAI).
+- `LLM_PROVIDER=ollama|groq|openai` fuerza un provider (opcional).
+- `DATABASE_URL` URL de Postgres/SQLite.
+- `OLLAMA_BASE_URL` y `OLLAMA_MODEL` para Ollama; `OLLAMA_API_KEY` es opcional (local suele funcionar con token dummy).
+
+Nota: no guardes keys reales en `.env` si lo versionas. Define `OPENAI_API_KEY`/`GROQ_API_KEY` como variables de entorno (shell/CI/CD).
+
+Ejemplos Ollama:
+
+- Local: `OLLAMA_BASE_URL=http://localhost:11434/v1` y sin key real.
+- API remota: `OLLAMA_BASE_URL=https://tu-endpoint-ollama/v1` y `OLLAMA_API_KEY=<tu_key>`.
+
+## Probar chat
+
+Endpoint:
+
+- `POST /v1/chat` con body `{tenant_id,user_id,channel,message,conversation_id?}`.
+- `GET /health` (liveness).
+- `GET /v1/health` para verificar estado de API/DB/LLM (readiness).
+
+Ejemplo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_id": "mi-negocio",
+    "user_id": "user-1",
+    "channel": "web",
+    "message": "Hola, quiero reservar un corte"
+  }'
+```
+
+## Postgres con Podman (dev)
+
+Levantar Postgres en contenedor y ejecutar la API local (host):
+
+```bash
+podman run --name booking_engine_postgres -d \
+  -e POSTGRES_USER=chatbot \
+  -e POSTGRES_PASSWORD=chatbot \
+  -e POSTGRES_DB=chatbot \
+  -p 5432:5432 \
+  postgres:16-alpine
+```
+
+En tu `.env` (para `make run`) usa:
+
+```bash
+DATABASE_URL=postgresql+psycopg://chatbot:chatbot@localhost:5432/chatbot
+```
+
+Luego:
+
+```bash
+make run
 ```
 
 ## Datos demo cargados por defecto

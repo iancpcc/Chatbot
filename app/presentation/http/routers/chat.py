@@ -24,4 +24,3 @@ def chat(
         )
     )
     return ChatResponse(conversation_id=result.conversation_id, reply=result.reply)
-

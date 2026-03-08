@@ -25,3 +25,17 @@ class CreateResourceRequest(BaseModel):
 class CreateResourceResponse(BaseModel):
     resource_id: UUID
     name: str
+
+
+class ServiceItemResponse(BaseModel):
+    service_id: UUID
+    tenant_id: str
+    name: str
+    duration_minutes: int
+    price: float
+
+
+class ResourceItemResponse(BaseModel):
+    resource_id: UUID
+    tenant_id: str
+    name: str

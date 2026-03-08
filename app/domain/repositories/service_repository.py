@@ -13,3 +13,7 @@ class ServiceRepository(ABC):
     @abstractmethod
     def save(self, tenant_id: str, service: Service) -> None:
         pass
+
+    @abstractmethod
+    def list(self, tenant_id: str) -> list[Service]:
+        pass

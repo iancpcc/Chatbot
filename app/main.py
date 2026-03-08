@@ -9,6 +9,7 @@ from app.presentation.http.middleware import register_middlewares
 from app.presentation.http.routers.bookings import router as bookings_router
 from app.presentation.http.routers.catalog import router as catalog_router
 from app.presentation.http.routers.chat import router as chat_router
+from app.presentation.http.routers.health import router as health_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +26,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Booking Engine", version="0.1.0", lifespan=lifespan)
 register_middlewares(app)
 register_exception_handlers(app)
+app.include_router(health_router)
 app.include_router(bookings_router, prefix="/v1")
 app.include_router(catalog_router, prefix="/v1")
 app.include_router(chat_router, prefix="/v1")

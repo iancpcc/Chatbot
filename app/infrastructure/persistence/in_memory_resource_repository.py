@@ -14,3 +14,7 @@ class InMemoryResourceRepository(ResourceRepository):
 
     def save(self, tenant_id: str, resource: Resource) -> None:
         self._storage[(tenant_id, resource.id)] = resource
+
+    def list(self, tenant_id: str) -> list[Resource]:
+        resources = [r for (t_id, _), r in self._storage.items() if t_id == tenant_id]
+        return sorted(resources, key=lambda r: (r.name.lower(), str(r.id)))

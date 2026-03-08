@@ -1,111 +1,105 @@
-# Architecture AS-IS
+# Architecture AS-IS (Actualizado 2026-03-08)
 
 ## Overview
-El proyecto sigue una arquitectura en capas con separación entre `presentation`, `application`, `domain` e `infrastructure`, usando FastAPI como entrada HTTP y repositorios en memoria como persistencia actual.
 
-## Project Structure
+El proyecto es un **Motor de Reservas Conversacional** basado en Arquitectura Hexagonal. Utiliza **FastAPI** para la capa de presentación y **SQLAlchemy** para la persistencia (Postgres/SQLite). La lógica de IA utiliza modelos de lenguaje (LLM) a través de proveedores configurables.
+
+## Project Structure (Actualizada)
+
 ```text
 Chatbot/
 ├── app/
-│   ├── main.py
+│   ├── main.py (Entrypoint con lifespan)
 │   ├── presentation/http/
-│   │   ├── routers/
-│   │   │   └── bookings.py
-│   │   ├── schemas/
-│   │   │   └── booking_schema.py
-│   │   └── dependencies.py
+│   │   ├── routers/ (bookings, catalog, chat, health)
+│   │   └── dependencies.py (Inyección de dependencias y reset_state)
 │   ├── application/
-│   │   ├── dto/
-│   │   │   └── create_booking_dto.py
-│   │   └── use_cases/
-│   │       ├── create_booking.py
-│   │       └── cancel_booking.py
+│   │   └── use_cases/ (CreateBooking, RespondToMessage, ListServices, etc.)
 │   ├── domain/
-│   │   ├── entities/
-│   │   │   ├── booking.py
-│   │   │   ├── conversation.py
-│   │   │   ├── customer.py
-│   │   │   ├── resource.py
-│   │   │   └── service.py
-│   │   ├── repositories/
-│   │   │   ├── booking_repository.py
-│   │   │   ├── conversation_repository.py
-│   │   │   ├── resource_repository.py
-│   │   │   └── service_repository.py
-│   │   ├── services/
-│   │   │   └── availability_policy.py
-│   │   └── value_objects/
-│   │       ├── booking_status.py
-│   │       ├── conversation.py
-│   │       └── time_slot.py
+│   │   ├── entities/ (Booking, Service, Resource, Conversation)
+│   │   └── repositories/ (Interfaces/Contratos de BD)
 │   └── infrastructure/
-│       └── persistence/
-│           ├── in_memory_booking_repository.py
-│           ├── in_memory_conversation_repository.py
-│           ├── in_memory_resource_repository.py
-│           └── in_memory_service_repository.py
-├── main.py
-├── pyproject.toml
-├── dockerfile
-└── docker-compose.yaml
+│       ├── persistence/ (Implementación SQLAlchemy + bootstrap/seeding)
+│       └── providers/llm/ (Integración con Ollama / OpenAI)
+├── chatbot.db (Base de datos local por defecto)
+├── docker-compose.yaml (Servicios de Postgres y Ollama)
+└── Makefile (Comandos de ejecución)
 ```
 
-## Layered Component Diagram
+## Layered Component Diagram (Mermaid)
+
+Este diagrama muestra cómo se desacoplan las capas siguiendo los principios de la Arquitectura Hexagonal.
+
 ```mermaid
-flowchart LR
-  Client[HTTP Client] --> FastAPI[FastAPI app/main.py]
-  FastAPI --> Router[bookings router]
-  Router --> UC1[CreateBooking use case]
-  Router --> UC2[CancelBooking use case]
+flowchart TD
+  %% Capa de Presentación
+  subgraph Presentation [Capa de Presentación - FastAPI]
+    Router[Routers: bookings, chat, catalog, health]
+    Deps[dependencies.py: Inyección de Dependencias]
+  end
 
-  UC1 --> BRepoContract[BookingRepository contract]
-  UC1 --> SRepoContract[ServiceRepository contract]
-  UC1 --> RRepoContract[ResourceRepository contract]
-  UC1 --> Policy[AvailabilityPolicy]
+  %% Capa de Aplicación
+  subgraph Application [Capa de Aplicación - Use Cases]
+    UC_Book[Create/Cancel/List Bookings]
+    UC_Chat[RespondToMessage]
+    UC_Cat[List Services/Resources]
+  end
 
-  UC2 --> BRepoContract
+  %% Capa de Dominio
+  subgraph Domain [Capa de Dominio - Entidades y Contratos]
+    Entities[Entidades: Booking, Conversation, Service, Resource]
+    RepoContracts[Interfaces: BookingRepo, LLMClient, etc.]
+  end
 
-  BRepoContract --> BRepoImpl[InMemoryBookingRepository]
-  SRepoContract --> SRepoImpl[InMemoryServiceRepository]
-  RRepoContract --> RRepoImpl[InMemoryResourceRepository]
+  %% Capa de Infraestructura
+  subgraph Infrastructure [Capa de Infraestructura]
+    SQL[SQLAlchemy Persistence - Postgres/SQLite]
+    LLM[LLM Providers - Ollama/OpenAI]
+  end
 
-  UC1 --> BookingEntity[Booking]
-  UC1 --> CustomerEntity[Customer]
-  UC1 --> ServiceEntity[Service]
-  UC1 --> ResourceEntity[Resource]
-  UC1 --> TimeSlotVO[TimeSlot]
-  BookingEntity --> BookingStatusVO[BookingStatus]
+  %% Relaciones
+  Router --> Deps
+  Deps --> UC_Book
+  Deps --> UC_Chat
+  Deps --> UC_Cat
+  UC_Book --> RepoContracts
+  UC_Chat --> RepoContracts
+  UC_Cat --> RepoContracts
+  RepoContracts --> Entities
+  SQL -- Implementa --> RepoContracts
+  LLM -- Implementa --> RepoContracts
 ```
 
-## Runtime Request Flow (Create Booking)
+## Runtime Request Flow (Chat)
+
+Flujo dinámico de una interacción típica de un usuario con el chatbot.
+
 ```mermaid
 sequenceDiagram
-  participant C as Client
-  participant API as FastAPI Router
-  participant U as CreateBooking
-  participant SR as ServiceRepository
-  participant RR as ResourceRepository
-  participant BR as BookingRepository
-  participant P as AvailabilityPolicy
+  participant U as Usuario
+  participant R as Chat Router
+  participant UC as RespondToMessage (UC)
+  participant LLM as LLM Client (Ollama/OpenAI)
+  participant DB as Postgres
 
-  C->>API: POST /bookings
-  API->>U: execute(CreateBookingRequest DTO)
-  U->>SR: get(tenant_id, service_id)
-  U->>RR: get(tenant_id, resource_id)
-  U->>BR: get_by_resource(tenant_id, resource_id)
-  U->>P: ensure_available(existing_bookings, requested_slot)
-  U->>BR: save(Booking)
-  U-->>API: CreateBookingResponse
-  API-->>C: 200 {booking_id, status}
+  U->>R: POST /v1/chat/message
+  R->>UC: execute(conversation_id, message)
+  UC->>DB: Obtener historial y contexto (Servicios/Recursos)
+  UC->>LLM: Generar respuesta con contexto
+  LLM-->>UC: Respuesta de texto
+  UC->>DB: Guardar nuevo mensaje en historial
+  UC-->>R: Respuesta final
+  R-->>U: JSON {response, status}
 ```
 
-## Dependency Direction
-- `presentation` depende de `application`.
-- `application` depende de contratos en `domain`.
-- `infrastructure` implementa contratos de `domain`.
-- `domain` no depende de capas externas.
+## Componentes Clave de Infraestructura
 
-## Current Notes
-- Persistencia actual: solo en memoria (`in_memory_*`), no base de datos activa.
-- Existen carpetas preparadas para crecimiento (`application/conversational`, `application/interfaces`, `infrastructure/providers/*`) sin implementación todavía.
-- `main.py` de la raíz es un entrypoint auxiliar y no participa en la API HTTP principal (`app/main.py`).
+1. **Persistencia SQL**: Implementada con SQLAlchemy. El esquema se genera automáticamente al iniciar la app usando `Base.metadata.create_all`.
+2. **LLM Factory**: Sistema que permite intercambiar el motor de IA (ej. cambiar de Ollama local a OpenAI en la nube) mediante variables de entorno.
+3. **Bootstrap & Seeding**: Al arrancar, el sistema verifica e inserta un catálogo de prueba (`demo-salon`) para facilitar pruebas inmediatas.
+
+## Notas Actuales de Mantenimiento
+
+- **Entornos**: Controlados vía `.env`. Soporta `DATABASE_URL` para cambiar entre SQLite (desarrollo) y Postgres (producción).
+- **Multitenancy**: Todas las tablas incluyen `tenant_id`. Es obligatorio filtrar por este campo en todos los repositorios.
+- **Estado de Conversación**: El historial se guarda en la tabla `conversations` dentro de un campo JSON llamado `state`.

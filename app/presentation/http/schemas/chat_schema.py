@@ -14,4 +14,3 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     conversation_id: UUID
     reply: str
-
