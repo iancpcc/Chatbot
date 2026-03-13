@@ -1,14 +1,17 @@
 import os
 import time
+from pathlib import Path
 from uuid import UUID
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from app.domain.entities.resource import Resource
 from app.domain.entities.service import Service
 from app.infrastructure.persistence.sqlalchemy_database import engine
-from app.infrastructure.persistence.sqlalchemy_models import Base, ResourceModel, ServiceModel
+from app.infrastructure.persistence.sqlalchemy_models import ResourceModel, ServiceModel
 from app.infrastructure.persistence.sqlalchemy_resource_repository import (
     SqlAlchemyResourceRepository,
 )
@@ -22,7 +25,7 @@ DEMO_SERVICE_ID = UUID("11111111-1111-1111-1111-111111111111")
 DEMO_RESOURCE_ID = UUID("22222222-2222-2222-2222-222222222222")
 
 
-def init_schema() -> None:
+def apply_migrations() -> None:
     # In docker-compose, Postgres may not be ready when the API starts.
     # Retry for a short, configurable window to avoid crashing on startup.
     max_wait_seconds = float(os.getenv("DB_INIT_MAX_WAIT_SECONDS", "10"))
@@ -32,13 +35,26 @@ def init_schema() -> None:
     while True:
         attempt += 1
         try:
-            Base.metadata.create_all(bind=engine)
+            _wait_until_db_ready()
+            command.upgrade(_alembic_config(), "head")
             return
         except OperationalError:
             if time.time() >= deadline:
                 raise
             sleep_seconds = min(0.25 * (2 ** (attempt - 1)), 2.0)
             time.sleep(sleep_seconds)
+
+
+def _wait_until_db_ready() -> None:
+    with engine.connect():
+        return
+
+
+def _alembic_config() -> Config:
+    project_root = Path(__file__).resolve().parents[3]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "alembic"))
+    return config
 
 
 def seed_demo_catalog() -> None:

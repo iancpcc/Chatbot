@@ -23,15 +23,20 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Booking Engine", version="0.1.0", lifespan=lifespan)
-register_middlewares(app)
-register_exception_handlers(app)
-app.include_router(health_router)
-app.include_router(bookings_router, prefix="/v1")
-app.include_router(catalog_router, prefix="/v1")
-app.include_router(chat_router, prefix="/v1")
+def create_app() -> FastAPI:
+    app = FastAPI(title="Booking Engine", version="0.1.0", lifespan=lifespan)
+    register_middlewares(app)
+    register_exception_handlers(app)
+    app.include_router(health_router)
+    app.include_router(bookings_router, prefix="/v1")
+    app.include_router(catalog_router, prefix="/v1")
+    app.include_router(chat_router, prefix="/v1")
+
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        return {"message": "Welcome to the Chatbot"}
+
+    return app
 
 
-@app.get("/")
-async def root() -> dict[str, str]:
-    return {"message": "Welcome to the Chatbot"}
+app = create_app()

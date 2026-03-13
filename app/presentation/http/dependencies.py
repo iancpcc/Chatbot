@@ -1,3 +1,5 @@
+import os
+
 from app.application.use_cases.create_booking import CreateBooking
 from app.application.use_cases.cancel_booking import CancelBooking
 from app.application.use_cases.create_resource import CreateResource
@@ -7,7 +9,7 @@ from app.application.use_cases.list_bookings import ListBookings
 from app.application.use_cases.list_resources import ListResources
 from app.application.use_cases.list_services import ListServices
 from app.application.use_cases.respond_to_message import RespondToMessage
-from app.infrastructure.persistence.bootstrap import init_schema, seed_demo_catalog
+from app.infrastructure.persistence.bootstrap import apply_migrations, seed_demo_catalog
 from app.infrastructure.persistence.sqlalchemy_booking_repository import (
     SqlAlchemyBookingRepository,
 )
@@ -55,12 +57,14 @@ def reset_state() -> None:
     global _list_services
     global _list_resources
 
-    init_schema()
+    if _should_auto_apply_migrations():
+        apply_migrations()
     _booking_repository = SqlAlchemyBookingRepository()
     _service_repository = SqlAlchemyServiceRepository()
     _resource_repository = SqlAlchemyResourceRepository()
     _conversation_repository = SqlAlchemyConversationRepository()
-    seed_demo_catalog()
+    if _should_seed_demo_catalog():
+        seed_demo_catalog()
 
     # LLM client is real and selected by APP_ENV/LLM_PROVIDER.
     _llm_client = create_llm_client()
@@ -117,3 +121,34 @@ def get_list_services_use_case() -> ListServices:
 
 def get_list_resources_use_case() -> ListResources:
     return _list_resources
+
+
+def _is_production_env() -> bool:
+    app_env = os.getenv("APP_ENV", "dev").strip().lower()
+    return app_env in {"prod", "production"}
+
+
+def _read_bool_env(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _should_auto_apply_migrations() -> bool:
+    configured = _read_bool_env("AUTO_APPLY_MIGRATIONS")
+    if configured is not None:
+        return configured
+    return not _is_production_env()
+
+
+def _should_seed_demo_catalog() -> bool:
+    configured = _read_bool_env("SEED_DEMO_DATA")
+    if configured is not None:
+        return configured
+    return not _is_production_env()
