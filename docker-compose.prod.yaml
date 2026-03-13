@@ -6,41 +6,36 @@ services:
       context: .
       dockerfile: dockerfile
       target: runtime
-    container_name: booking_engine_api
+    container_name: booking_engine_api_prod
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
-      APP_ENV: dev
-      AUTO_APPLY_MIGRATIONS: "true"
-      SEED_DEMO_DATA: "true"
-      WEB_CONCURRENCY: "1"
+      APP_ENV: prod
+      AUTO_APPLY_MIGRATIONS: "false"
+      SEED_DEMO_DATA: "false"
+      WEB_CONCURRENCY: "2"
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    volumes:
-      - ./app:/app/app
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
+    restart: unless-stopped
 
   postgres:
     image: postgres:16
-    container_name: booking_engine_postgres
+    container_name: booking_engine_postgres_prod
     environment:
       POSTGRES_USER: chatbot
       POSTGRES_PASSWORD: chatbot
       POSTGRES_DB: chatbot
-    ports:
-      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_prod_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbot"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
+  postgres_prod_data:

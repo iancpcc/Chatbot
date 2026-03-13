@@ -17,6 +17,10 @@ make test
 make lint
 make typecheck
 make check
+make db-upgrade
+make db-revision m="add_table_x"
+make docker-up
+make docker-prod-up
 ```
 
 ## Configuracion
@@ -26,6 +30,11 @@ Variables principales (ver `.env.example`):
 - `APP_ENV=dev|staging|prod` selecciona el provider de LLM (dev->Ollama, staging->Groq, prod->OpenAI).
 - `LLM_PROVIDER=ollama|groq|openai` fuerza un provider (opcional).
 - `DATABASE_URL` URL de Postgres/SQLite.
+- `AUTO_APPLY_MIGRATIONS` aplica `alembic upgrade head` al iniciar la API (por defecto: `true` en `dev/staging`, `false` en `prod`).
+- `SEED_DEMO_DATA` inserta catálogo demo al iniciar (por defecto: `true` en `dev/staging`, `false` en `prod`).
+- `API_KEY` activa autenticación básica por header `x-api-key` en `/v1/*` (excepto `/v1/health`).
+- `CORS_ALLOWED_ORIGINS` orígenes permitidos para CORS (lista separada por comas).
+- `WEB_CONCURRENCY` número de workers Uvicorn para runtime en contenedor.
 - `OLLAMA_BASE_URL` y `OLLAMA_MODEL` para Ollama; `OLLAMA_API_KEY` es opcional (local suele funcionar con token dummy).
 
 Nota: no guardes keys reales en `.env` si lo versionas. Define `OPENAI_API_KEY`/`GROQ_API_KEY` como variables de entorno (shell/CI/CD).
@@ -48,6 +57,7 @@ Ejemplo:
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
+  -H "x-api-key: <API_KEY>" \
   -d '{
     "tenant_id": "mi-negocio",
     "user_id": "user-1",
@@ -80,6 +90,57 @@ Luego:
 ```bash
 make run
 ```
+
+## Migraciones (Alembic)
+
+Aplicar migraciones en el entorno actual:
+
+```bash
+make db-upgrade
+```
+
+Crear nueva migración autogenerada:
+
+```bash
+make db-revision m="describe_change"
+```
+
+Recomendado para STG/PROD:
+
+- Ejecutar `make db-upgrade` en el pipeline/deploy antes de levantar la nueva versión.
+- Mantener `AUTO_APPLY_MIGRATIONS=false` en `prod` para evitar cambios de esquema automáticos en runtime.
+- Mantener `SEED_DEMO_DATA=false` en `prod`.
+
+## Docker Compose
+
+Desarrollo (hot reload):
+
+```bash
+docker compose up --build
+```
+
+Producción (sin bind mounts de código):
+
+```bash
+docker compose -f docker-compose.prod.yaml up -d --build
+```
+
+Para PROD, ejecuta migraciones antes de levantar la nueva versión:
+
+```bash
+make db-upgrade
+```
+
+El contenedor de API corre como usuario no-root y usa `WEB_CONCURRENCY` para escalar workers.
+
+## CI
+
+Se añadió workflow de GitHub Actions en `.github/workflows/ci.yml` con:
+
+- `ruff`
+- `mypy`
+- `pytest`
+- `docker build` (validación de empaquetado)
 
 ## Datos demo cargados por defecto
 
@@ -153,7 +214,7 @@ curl -X PATCH "http://127.0.0.1:8000/v1/bookings/BOOKING_ID/cancel?tenant_id=mi-
 
 ```json
 {
-  "code": "validation_error|not_found|conflict|domain_error|request_validation_error",
+  "code": "validation_error|not_found|conflict|domain_error|request_validation_error|unauthorized",
   "message": "Human readable message",
   "details": null,
   "request_id": "uuid"
