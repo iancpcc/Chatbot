@@ -48,7 +48,7 @@ Ejemplos Ollama:
 
 Endpoint:
 
-- `POST /v1/chat` con body `{tenant_id,user_id,channel,message,conversation_id?}`.
+- `POST /v1/chat` con body `{tenant_id,user_id,channel,message,conversation_id?,action_id?}`.
 - `GET /health` (liveness).
 - `GET /v1/health` para verificar estado de API/DB/LLM (readiness).
 
@@ -65,6 +65,31 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
     "message": "Hola, quiero reservar un corte"
   }'
 ```
+
+Respuesta de chat (compatible):
+
+- `reply` (texto plano, legacy)
+- `response` (payload estructurado para UI: `text|options|confirmation`)
+
+Ejemplo de payload estructurado:
+
+```json
+{
+  "conversation_id": "uuid",
+  "reply": "¿En qué puedo ayudarte?",
+  "response": {
+    "type": "options",
+    "message": "¿En qué puedo ayudarte?",
+    "text": "¿En qué puedo ayudarte?",
+    "options": [
+      {"id": "catalog", "label": "Ver servicios"},
+      {"id": "booking", "label": "Reservar cita"}
+    ]
+  }
+}
+```
+
+También puedes enviar `action_id` en el request para manejar clicks de botones (ej. `booking`, `confirm`, `cancel`).
 
 ## Postgres con Podman (dev)
 

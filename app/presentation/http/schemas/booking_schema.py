@@ -6,7 +6,7 @@ from datetime import datetime
 class CreateBookingRequest(BaseModel):
     tenant_id: str
     service_id: UUID
-    resource_id: UUID
+    resource_id: UUID | None = None
     customer_name: str
     customer_contact: str
     start: datetime

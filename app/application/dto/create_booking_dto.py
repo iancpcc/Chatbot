@@ -7,7 +7,7 @@ from uuid import UUID
 class CreateBookingRequest:
     tenant_id: str
     service_id: UUID
-    resource_id: UUID
+    resource_id: UUID | None
     customer_name: str
     customer_contact: str
     start: datetime

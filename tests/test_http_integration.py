@@ -42,21 +42,23 @@ def _create_booking(
     client: TestClient,
     tenant_id: str,
     service_id: str,
-    resource_id: str,
+    resource_id: str | None,
     start: datetime,
     end: datetime,
 ) -> dict:
+    payload = {
+        "tenant_id": tenant_id,
+        "service_id": service_id,
+        "customer_name": "Ana",
+        "customer_contact": "+34123456789",
+        "start": _iso(start),
+        "end": _iso(end),
+    }
+    if resource_id is not None:
+        payload["resource_id"] = resource_id
     response = client.post(
         f"{API_PREFIX}/bookings",
-        json={
-            "tenant_id": tenant_id,
-            "service_id": service_id,
-            "resource_id": resource_id,
-            "customer_name": "Ana",
-            "customer_contact": "+34123456789",
-            "start": _iso(start),
-            "end": _iso(end),
-        },
+        json=payload,
     )
     assert response.status_code == 200
     return response.json()
@@ -293,3 +295,28 @@ def test_http_multi_tenant_isolation_for_get_and_cancel() -> None:
     )
     assert cancel_response.status_code == 404
     assert cancel_response.json()["code"] == "not_found"
+
+
+def test_http_booking_can_be_created_without_resource_id() -> None:
+    reset_state()
+    client = TestClient(app)
+    tenant_id = "tenant-http-no-resource"
+    service_id = _create_service(client, tenant_id, name="Manicure")
+    resource_id = _create_resource(client, tenant_id, name="Mesa 1")
+
+    created = _create_booking(
+        client=client,
+        tenant_id=tenant_id,
+        service_id=service_id,
+        resource_id=None,
+        start=datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 3, 1, 14, 30, tzinfo=timezone.utc),
+    )
+    booking_id = created["booking_id"]
+
+    get_response = client.get(
+        f"{API_PREFIX}/bookings/{booking_id}",
+        params={"tenant_id": tenant_id},
+    )
+    assert get_response.status_code == 200
+    assert get_response.json()["resource_id"] == resource_id

@@ -79,12 +79,17 @@ def reset_state() -> None:
     _create_resource = CreateResource(_resource_repository)
     _list_bookings = ListBookings(_booking_repository)
     _get_booking = GetBooking(_booking_repository)
+    _list_services = ListServices(_service_repository)
+    _list_resources = ListResources(_resource_repository)
     _respond_to_message = RespondToMessage(
         conversation_repository=_conversation_repository,
         llm_client=_llm_client,
+        create_booking_use_case=_create_booking,
+        cancel_booking_use_case=_cancel_booking,
+        list_bookings_use_case=_list_bookings,
+        list_services_use_case=_list_services,
+        list_resources_use_case=_list_resources,
     )
-    _list_services = ListServices(_service_repository)
-    _list_resources = ListResources(_resource_repository)
 
 
 def get_create_booking_use_case() -> CreateBooking:

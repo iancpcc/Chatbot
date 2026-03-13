@@ -50,16 +50,18 @@ class Booking:
             if existing.status == BookingStatus.CANCELLED:
                 continue
 
-            if existing.resource == self.resource and existing.time_slot.overlaps(
-                self.time_slot
+            if (
+                existing.resource.id == self.resource.id
+                and existing.time_slot.overlaps(self.time_slot)
             ):
                 return False
 
         return True
 
     def is_overlapping(self, other: "Booking") -> bool:
-        return self.resource == other.resource and self.time_slot.overlaps(
-            other.time_slot
+        return (
+            self.resource.id == other.resource.id
+            and self.time_slot.overlaps(other.time_slot)
         )
 
     def is_past(self) -> bool:

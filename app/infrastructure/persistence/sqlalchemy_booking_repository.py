@@ -94,6 +94,10 @@ class SqlAlchemyBookingRepository(BookingRepository):
                 ResourceModel.id == row.resource_id,
             )
         ).scalar_one()
+        resource = Resource(
+            id=UUID(resource_row.id),
+            name=resource_row.name,
+        )
 
         return Booking(
             id=UUID(row.id),
@@ -104,10 +108,7 @@ class SqlAlchemyBookingRepository(BookingRepository):
                 duration_minutes=service_row.duration_minutes,
                 price=service_row.price,
             ),
-            resource=Resource(
-                id=UUID(resource_row.id),
-                name=resource_row.name,
-            ),
+            resource=resource,
             customer=Customer(
                 full_name=row.customer_name,
                 contact=row.customer_contact,

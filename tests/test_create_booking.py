@@ -102,3 +102,69 @@ def test_create_booking_fails_when_slot_is_taken() -> None:
 
     with pytest.raises(ConflictError):
         use_case.execute(overlapping_request)
+
+
+def test_create_booking_auto_assigns_available_resource_when_not_provided() -> None:
+    tenant_id = "tenant-auto-assign"
+    service_repo = InMemoryServiceRepository()
+    resource_repo = InMemoryResourceRepository()
+    booking_repo = InMemoryBookingRepository()
+
+    service = Service(name="Corte", duration_minutes=30, price=20.0)
+    busy_resource = Resource(name="Silla 1")
+    free_resource = Resource(name="Silla 2")
+    service_repo.save(tenant_id, service)
+    resource_repo.save(tenant_id, busy_resource)
+    resource_repo.save(tenant_id, free_resource)
+
+    use_case = CreateBooking(booking_repo, service_repo, resource_repo)
+
+    use_case.execute(
+        CreateBookingRequest(
+            tenant_id=tenant_id,
+            service_id=service.id,
+            resource_id=busy_resource.id,
+            customer_name="Ana",
+            customer_contact="+34123456789",
+            start=datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc),
+            end=datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
+        )
+    )
+    created = use_case.execute(
+        CreateBookingRequest(
+            tenant_id=tenant_id,
+            service_id=service.id,
+            resource_id=None,
+            customer_name="Luis",
+            customer_contact="+34100000000",
+            start=datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc),
+            end=datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
+        )
+    )
+
+    stored = booking_repo.get_by_id(created.booking_id)
+    assert stored is not None
+    assert stored.resource is not None
+    assert stored.resource.id == free_resource.id
+
+
+def test_create_booking_fails_when_no_resources_exist() -> None:
+    tenant_id = "tenant-unassigned"
+    service_repo = InMemoryServiceRepository()
+    booking_repo = InMemoryBookingRepository()
+    service = Service(name="Manicure", duration_minutes=30, price=25.0)
+    service_repo.save(tenant_id, service)
+
+    use_case = CreateBooking(booking_repo, service_repo, InMemoryResourceRepository())
+    with pytest.raises(NotFoundError):
+        use_case.execute(
+            CreateBookingRequest(
+                tenant_id=tenant_id,
+                service_id=service.id,
+                resource_id=None,
+                customer_name="Ana",
+                customer_contact="+34123456789",
+                start=datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc),
+                end=datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
+            )
+        )

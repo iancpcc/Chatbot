@@ -5,7 +5,8 @@ from app.application.dto.create_booking_dto import (
     CreateBookingRequest,
     CreateBookingResponse,
 )
-from app.domain.exceptions import NotFoundError, ValidationError
+from app.domain.entities.resource import Resource
+from app.domain.exceptions import ConflictError, NotFoundError, ValidationError
 from app.domain.entities.booking import Booking
 from app.domain.entities.customer import Customer
 from app.domain.value_objects.time_slot import TimeSlot
@@ -29,10 +30,6 @@ class CreateBooking:
         if not service:
             raise NotFoundError("Service not found")
 
-        resource = self.resource_repository.get(request.tenant_id, request.resource_id)
-        if not resource:
-            raise NotFoundError("Resource not found")
-
         customer = Customer(
             full_name=request.customer_name,
             contact=request.customer_contact,
@@ -45,15 +42,7 @@ class CreateBooking:
                 "Requested slot duration must match service duration_minutes"
             )
 
-        existing_bookings = self.booking_repository.get_by_resource(
-            tenant_id=request.tenant_id,
-            resource_id=request.resource_id,
-        )
-
-        AvailabilityPolicy.ensure_available(
-            existing_bookings=existing_bookings,
-            requested_slot=time_slot,
-        )
+        resource = self._resolve_resource(request=request, requested_slot=time_slot)
 
         booking = Booking(
             tenant_id=request.tenant_id,
@@ -68,4 +57,68 @@ class CreateBooking:
         return CreateBookingResponse(
             booking_id=booking.id,
             status=booking.status.value,
+        )
+
+    def _resolve_resource(
+        self,
+        *,
+        request: CreateBookingRequest,
+        requested_slot: TimeSlot,
+    ) -> Resource:
+        if request.resource_id is not None:
+            selected = self.resource_repository.get(request.tenant_id, request.resource_id)
+            if not selected:
+                raise NotFoundError("Resource not found")
+            self._ensure_slot_available_for_resource(
+                tenant_id=request.tenant_id,
+                resource=selected,
+                requested_slot=requested_slot,
+            )
+            return selected
+
+        resources = self.resource_repository.list(request.tenant_id)
+        if not resources:
+            raise NotFoundError("No resources available for tenant")
+
+        for resource in resources:
+            if self._is_resource_available(
+                tenant_id=request.tenant_id,
+                resource=resource,
+                requested_slot=requested_slot,
+            ):
+                return resource
+
+        raise ConflictError("Time slot not available")
+
+    def _is_resource_available(
+        self,
+        *,
+        tenant_id: str,
+        resource: Resource,
+        requested_slot: TimeSlot,
+    ) -> bool:
+        try:
+            self._ensure_slot_available_for_resource(
+                tenant_id=tenant_id,
+                resource=resource,
+                requested_slot=requested_slot,
+            )
+            return True
+        except ConflictError:
+            return False
+
+    def _ensure_slot_available_for_resource(
+        self,
+        *,
+        tenant_id: str,
+        resource: Resource,
+        requested_slot: TimeSlot,
+    ) -> None:
+        existing_bookings = self.booking_repository.get_by_resource(
+            tenant_id=tenant_id,
+            resource_id=resource.id,
+        )
+        AvailabilityPolicy.ensure_available(
+            existing_bookings=existing_bookings,
+            requested_slot=requested_slot,
         )

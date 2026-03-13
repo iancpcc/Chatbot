@@ -21,7 +21,8 @@ class InMemoryBookingRepository(BookingRepository):
         return [
             b
             for b in self._storage.values()
-            if b.tenant_id == tenant_id and b.resource.id == resource_id
+            if b.tenant_id == tenant_id
+            and b.resource.id == resource_id
         ]
 
     def list(

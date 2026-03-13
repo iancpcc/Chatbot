@@ -28,7 +28,7 @@ def test_http_chat_creates_and_persists_conversation() -> None:
                 "tenant_id": "tenant-chat-1",
                 "user_id": "user-1",
                 "channel": "web",
-                "message": "Hola",
+                "message": "Necesito ayuda con una consulta",
             },
         )
         assert first.status_code == 200
@@ -63,4 +63,3 @@ def test_http_chat_creates_and_persists_conversation() -> None:
         assert len(stored2.state["messages"]) == 4
 
     app.dependency_overrides.clear()
-
