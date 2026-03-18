@@ -1,26 +1,48 @@
-from unittest.mock import Mock
+import pytest
+from unittest.mock import Mock, MagicMock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
 
 from app.application.use_cases.respond_to_message import RespondToMessage
-from app.infrastructure.persistence.sqlalchemy_conversation_repository import (
-    SqlAlchemyConversationRepository,
+from app.infrastructure.persistence.in_memory_conversation_repository import (
+    InMemoryConversationRepository,
 )
 from app.main import app
 from app.presentation.http.dependencies import get_respond_to_message_use_case, reset_state
+
+@pytest.fixture(autouse=True)
+def mock_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Evitar migraciones y seeding con conexion real
+    monkeypatch.setenv("AUTO_APPLY_MIGRATIONS", "false")
+    monkeypatch.setenv("SEED_DEMO_DATA", "false")
+    
+    # Mockear engine por si alguna ruta lo utiliza al inicio (health)
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+    monkeypatch.setattr("app.presentation.http.routers.health.engine", mock_engine)
 
 
 def test_http_chat_creates_and_persists_conversation() -> None:
     reset_state()
 
-    conversation_repo = SqlAlchemyConversationRepository()
+    conversation_repo = InMemoryConversationRepository()
     mock_llm = Mock()
     mock_llm.generate_reply.side_effect = ["Respuesta 1", "Respuesta 2"]
 
-    use_case = RespondToMessage(conversation_repository=conversation_repo, llm_client=mock_llm)
+    use_case = RespondToMessage(
+        conversation_repository=conversation_repo, 
+        llm_client=mock_llm,
+        create_booking_use_case=Mock(),
+        cancel_booking_use_case=Mock(),
+        list_bookings_use_case=Mock(),
+        list_services_use_case=Mock(),
+        list_resources_use_case=Mock()
+    )
     app.dependency_overrides[get_respond_to_message_use_case] = lambda: use_case
 
+    first_req = None
     with TestClient(app) as client:
         first = client.post(
             "/v1/chat",
@@ -31,6 +53,9 @@ def test_http_chat_creates_and_persists_conversation() -> None:
                 "message": "Necesito ayuda con una consulta",
             },
         )
+        print("STATUS:", first.status_code)
+        if first.status_code != 200:
+            print("ERROR:", first.text)
         assert first.status_code == 200
         data1 = first.json()
         assert data1["reply"] == "Respuesta 1"

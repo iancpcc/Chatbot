@@ -26,6 +26,10 @@ class OllamaClient(LLMClient):
                 model=self._model,
                 messages=cast(Any, messages),
                 temperature=0.2,
+                max_tokens=120,
+                extra_body={
+                    "num_ctx": 2048,
+                },
             )
         except Exception as exc:
             raise InfrastructureError(f"Ollama request failed: {exc}") from exc

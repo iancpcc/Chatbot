@@ -6,6 +6,10 @@ run:
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	UV_CACHE_DIR=$(UV_CACHE_DIR) uv run uvicorn app.main:app --reload
 
+run-console:
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	UV_CACHE_DIR=$(UV_CACHE_DIR) uv run python scripts/chat_console.py
+
 test:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) uv run pytest -q
 
@@ -25,6 +29,11 @@ db-revision:
 	@if [ -z "$(m)" ]; then echo "Usage: make db-revision m='message'"; exit 1; fi; \
 	if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	UV_CACHE_DIR=$(UV_CACHE_DIR) uv run alembic revision --autogenerate -m "$(m)"
+db-current:
+	uv run alembic current
+
+db-history:
+	uv run alembic history
 
 docker-up:
 	docker compose up --build

@@ -373,6 +373,7 @@ class RespondToMessage:
                 message="No hay recursos disponibles para este tenant. Crea uno antes de reservar.",
             )
 
+        current_step = conversation.state.get("step")
         conversation.state["flow"] = "booking"
         draft = self._get_booking_draft(conversation)
         self._merge_booking_draft(
@@ -381,6 +382,7 @@ class RespondToMessage:
             action_id=action_id,
             services=services,
             resources=resources,
+            step=current_step,
         )
 
         if not draft["service_id"].strip():
@@ -630,6 +632,7 @@ class RespondToMessage:
         action_id: str | None,
         services: list[ServiceItem],
         resources: list[ResourceItem],
+        step: str | None = None,
     ) -> None:
         selection_input = action_id or message
         service_id = self._resolve_service_id(
@@ -655,6 +658,8 @@ class RespondToMessage:
         name = self._extract_labeled_value(message, labels=("nombre", "name"))
         if name is not None:
             draft["customer_name"] = name
+        elif step == "customer_name" and message.strip():
+            draft["customer_name"] = message.strip()
 
         contact = self._extract_labeled_value(
             message,
@@ -662,6 +667,8 @@ class RespondToMessage:
         )
         if contact is not None:
             draft["customer_contact"] = contact
+        elif step == "customer_contact" and message.strip():
+            draft["customer_contact"] = message.strip()
 
     def _resolve_service_id(
         self, *, message: str, services: list[ServiceItem]
