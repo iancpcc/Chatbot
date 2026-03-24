@@ -16,7 +16,7 @@ def test_reset_state_applies_migrations_and_seed_by_default_in_dev(
     )
     monkeypatch.setattr(
         dependencies,
-        "seed_demo_catalog",
+        "seed_nails_ec_catalog",
         lambda: calls.__setitem__("seed", calls["seed"] + 1),
     )
 
@@ -41,7 +41,7 @@ def test_reset_state_skips_migrations_and_seed_by_default_in_prod(
     )
     monkeypatch.setattr(
         dependencies,
-        "seed_demo_catalog",
+        "seed_nails_ec_catalog",
         lambda: calls.__setitem__("seed", calls["seed"] + 1),
     )
 
@@ -64,7 +64,7 @@ def test_reset_state_allows_overrides_in_prod(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         dependencies,
-        "seed_demo_catalog",
+        "seed_nails_ec_catalog",
         lambda: calls.__setitem__("seed", calls["seed"] + 1),
     )
 

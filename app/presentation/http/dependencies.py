@@ -9,7 +9,10 @@ from app.application.use_cases.list_bookings import ListBookings
 from app.application.use_cases.list_resources import ListResources
 from app.application.use_cases.list_services import ListServices
 from app.application.use_cases.respond_to_message import RespondToMessage
-from app.infrastructure.persistence.bootstrap import apply_migrations, seed_demo_catalog
+from app.infrastructure.persistence.bootstrap import (
+    apply_migrations,
+    seed_nails_ec_catalog,
+)
 from app.infrastructure.persistence.sqlalchemy_booking_repository import (
     SqlAlchemyBookingRepository,
 )
@@ -64,7 +67,7 @@ def reset_state() -> None:
     _resource_repository = SqlAlchemyResourceRepository()
     _conversation_repository = SqlAlchemyConversationRepository()
     if _should_seed_demo_catalog():
-        seed_demo_catalog()
+        seed_nails_ec_catalog()
 
     # LLM client is real and selected by APP_ENV/LLM_PROVIDER.
     _llm_client = create_llm_client()

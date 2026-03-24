@@ -1,7 +1,7 @@
 import os
 import time
+from typing import Any
 from pathlib import Path
-from uuid import UUID
 
 from alembic import command
 from alembic.config import Config
@@ -20,9 +20,44 @@ from app.infrastructure.persistence.sqlalchemy_service_repository import (
 )
 
 
-DEMO_TENANT_ID = "demo-salon"
-DEMO_SERVICE_ID = UUID("11111111-1111-1111-1111-111111111111")
-DEMO_RESOURCE_ID = UUID("22222222-2222-2222-2222-222222222222")
+from uuid import uuid4
+
+NAILS_TENANT_ID = "nails-studio-ec"
+
+
+# ---------- RESOURCES ----------
+def build_resources():
+    return [
+        {
+            "id": uuid4(),
+            "name": "Local 1",
+        }
+    ]
+
+
+# ---------- SERVICES (USD - Ecuador market) ----------
+SERVICES: list[dict[str, Any]] = [
+    # Uñas
+    {"name": "Manicura básica", "duration": 30, "price": 10.0},
+    {"name": "Manicura semipermanente", "duration": 45, "price": 18.0},
+    {"name": "Uñas acrílicas completas", "duration": 90, "price": 35.0},
+    {"name": "Relleno uñas acrílicas", "duration": 60, "price": 20.0},
+    {"name": "Pedicura completa", "duration": 60, "price": 20.0},
+    # Facial
+    {"name": "Limpieza facial básica", "duration": 60, "price": 25.0},
+    {"name": "Limpieza facial profunda", "duration": 90, "price": 40.0},
+    {"name": "Tratamiento antiacné", "duration": 60, "price": 35.0},
+    {"name": "Tratamiento hidratante facial", "duration": 60, "price": 30.0},
+    # Masajes
+    {"name": "Masaje relajante", "duration": 60, "price": 30.0},
+    {"name": "Masaje descontracturante", "duration": 45, "price": 25.0},
+    {"name": "Masaje corporal completo", "duration": 90, "price": 45.0},
+    # Depilación
+    {"name": "Depilación cejas", "duration": 15, "price": 5.0},
+    {"name": "Depilación labio superior", "duration": 10, "price": 4.0},
+    {"name": "Depilación piernas completas", "duration": 45, "price": 18.0},
+    {"name": "Depilación ingles", "duration": 20, "price": 10.0},
+]
 
 
 def apply_migrations() -> None:
@@ -57,40 +92,47 @@ def _alembic_config() -> Config:
     return config
 
 
-def seed_demo_catalog() -> None:
+def seed_nails_ec_catalog() -> None:
     service_repo = SqlAlchemyServiceRepository()
     resource_repo = SqlAlchemyResourceRepository()
 
+    resources = build_resources()
+
     with engine.connect() as conn:
-        service_exists = conn.execute(
-            select(ServiceModel.id).where(
-                ServiceModel.tenant_id == DEMO_TENANT_ID,
-                ServiceModel.id == str(DEMO_SERVICE_ID),
-            )
-        ).first()
-        resource_exists = conn.execute(
-            select(ResourceModel.id).where(
-                ResourceModel.tenant_id == DEMO_TENANT_ID,
-                ResourceModel.id == str(DEMO_RESOURCE_ID),
-            )
-        ).first()
+        # ---- RESOURCES (UUID dinámico) ----
+        for r in resources:
+            exists = conn.execute(
+                select(ResourceModel.id).where(
+                    ResourceModel.tenant_id == NAILS_TENANT_ID,
+                    ResourceModel.name == r["name"],  # clave natural
+                )
+            ).first()
 
-    if not service_exists:
-        service_repo.save(
-            DEMO_TENANT_ID,
-            Service(
-                id=DEMO_SERVICE_ID,
-                name="Corte de cabello",
-                duration_minutes=30,
-                price=20.0,
-            ),
-        )
+            if not exists:
+                resource_repo.save(
+                    NAILS_TENANT_ID,
+                    Resource(
+                        id=r["id"],
+                        name=r["name"],
+                    ),
+                )
 
-    if not resource_exists:
-        resource_repo.save(
-            DEMO_TENANT_ID,
-            Resource(
-                id=DEMO_RESOURCE_ID,
-                name="Silla 1",
-            ),
-        )
+        # ---- SERVICES ----
+        for s in SERVICES:
+            exists = conn.execute(
+                select(ServiceModel.id).where(
+                    ServiceModel.tenant_id == NAILS_TENANT_ID,
+                    ServiceModel.name == s["name"],
+                )
+            ).first()
+
+            if not exists:
+                service_repo.save(
+                    NAILS_TENANT_ID,
+                    Service(
+                        id=uuid4(),  # UID autogenerado
+                        name=s["name"],
+                        duration_minutes=s["duration"],
+                        price=s["price"],
+                    ),
+                )

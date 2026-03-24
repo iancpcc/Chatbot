@@ -42,6 +42,14 @@ _SYSTEM_PROMPT = (
     "You are a helpful booking assistant. Ask clarifying questions when needed. "
     "When you don't have enough information, ask for it instead of guessing."
 )
+_DATE_TODAY_OPTION = "date_today"
+_DATE_TOMORROW_OPTION = "date_tomorrow"
+_DATE_OTHER_OPTION = "date_other"
+_ASSISTANT_CHAT_OPTION = "assistant_chat"
+_BACK_OPTION = "back_to_menu"
+_CONFIRM_BOOKING_OPTION = "booking_confirm"
+_CHANGE_TIME_OPTION = "booking_change_time"
+_CANCEL_BOOKING_OPTION = "booking_cancel"
 _UUID_PATTERN = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
@@ -81,12 +89,23 @@ class RespondToMessage:
 
         input_text = action_id or message
         conversation = self._load_or_create_conversation(request)
+
         self._append_message(
             conversation,
             role="user",
             content=message if message else f"[action:{action_id}]",
         )
         self.conversation_repository.save(conversation)
+
+        if self._is_global_back_command(message, action_id):
+            payload = self._handle_global_back(conversation)
+            self._append_message(conversation, role="assistant", content=payload.message)
+            self.conversation_repository.save(conversation)
+            return RespondToMessageResponse(
+                conversation_id=conversation.id,
+                reply=payload.message,
+                response=payload,
+            )
 
         payload = self._try_handle_transactional_message(
             request=request,
@@ -95,7 +114,24 @@ class RespondToMessage:
             action_id=action_id or None,
         )
         if payload is None:
-            llm_messages = self._build_llm_messages(conversation)
+            if str(conversation.state.get("flow", "")).lower() == "assistant":
+                payload = self._handle_assistant_chat(
+                    request=request, conversation=conversation, message=message
+                )
+            else:
+                payload = self._handle_assistant_entry(
+                    request=request,
+                    conversation=conversation,
+                    message=message,
+                    action_id=action_id or None,
+                )
+
+        if payload is None:
+            llm_messages = self._build_llm_messages(
+                conversation=conversation,
+                tenant_id=request.tenant_id,
+                user_message=message,
+            )
             try:
                 llm_reply = self.llm_client.generate_reply(messages=llm_messages)
             except InfrastructureError:
@@ -141,7 +177,13 @@ class RespondToMessage:
         messages.append({"role": role, "content": content, "at": now})
         conversation.state["messages"] = messages
 
-    def _build_llm_messages(self, conversation: Conversation) -> list[dict[str, str]]:
+    def _build_llm_messages(
+        self,
+        *,
+        conversation: Conversation,
+        tenant_id: str,
+        user_message: str,
+    ) -> list[dict[str, str]]:
         raw_messages = conversation.state.get("messages", [])
         if not isinstance(raw_messages, list):
             raw_messages = []
@@ -166,15 +208,91 @@ class RespondToMessage:
     ) -> ResponsePayload | None:
         lower_message = message.lower().strip()
         flow = str(conversation.state.get("flow", "")).strip().lower()
+        selected_value = self._resolve_selected_value(
+            conversation=conversation,
+            message=message,
+            action_id=action_id,
+        )
+        lower_selected_value = selected_value.lower().strip()
+        effective_action_id = action_id or (
+            selected_value if selected_value != message.strip() else None
+        )
 
-        if action_id == "cancel" or self._is_cancel_intent(lower_message):
-            return self._handle_cancel(request.tenant_id, conversation, message)
+        if (
+            selected_value == _ASSISTANT_CHAT_OPTION
+            or self._is_assistant_intent(lower_message)
+        ):
+            conversation.state["flow"] = "assistant"
+            conversation.state["step"] = "assistant_chat"
+            conversation.state.pop("booking_draft", None)
+            conversation.state.pop("active_options", None)
+            return ResponsePayload(
+                type="text",
+                message=(
+                    "Perfecto. Estás hablando con el asistente.\n"
+                    "Escribe tu consulta y te respondo. Para volver al menú, escribe 'menu'."
+                ),
+            )
 
         if (
             flow == "booking"
-            or action_id == "booking"
-            or self._is_booking_intent(lower_message)
+            or selected_value == "booking"
+            or (self._is_booking_intent(lower_message) and not self._is_cancel_intent(lower_message))
         ):
+            if selected_value == _BACK_OPTION:
+                return self._handle_global_back(conversation)
+            return self._handle_create_booking(
+                tenant_id=request.tenant_id,
+                conversation=conversation,
+                message=selected_value if selected_value else message,
+                action_id=effective_action_id,
+            )
+
+        if selected_value == "catalog" or self._is_catalog_intent(lower_message):
+            return self._render_catalog(request.tenant_id)
+
+        if selected_value == "my_bookings" or self._is_list_bookings_intent(
+            lower_message
+        ):
+            return self._render_bookings(request.tenant_id)
+
+        if selected_value == _BACK_OPTION:
+            return self._handle_global_back(conversation)
+
+        if self._is_cancel_intent(lower_message):
+            if flow == "booking" or self._extract_first_uuid(selected_value):
+                return self._handle_cancel(request.tenant_id, conversation, selected_value)
+            return self._render_main_menu(conversation)
+
+        if self._is_greeting_intent(lower_message) or lower_selected_value == "hola":
+            return self._render_main_menu(conversation)
+
+        return None
+
+    def _handle_assistant_entry(
+        self,
+        *,
+        request: RespondToMessageRequest,
+        conversation: Conversation,
+        message: str,
+        action_id: str | None,
+    ) -> ResponsePayload | None:
+        if action_id == _ASSISTANT_CHAT_OPTION or self._is_assistant_intent(
+            message.lower()
+        ):
+            conversation.state["flow"] = "assistant"
+            conversation.state["step"] = "assistant_chat"
+            conversation.state.pop("booking_draft", None)
+            conversation.state.pop("active_options", None)
+            return ResponsePayload(
+                type="text",
+                message=(
+                    "Perfecto. Estás hablando con el asistente.\n"
+                    "Escribe tu consulta y te respondo. Para volver al menú, escribe 'menu'."
+                ),
+            )
+
+        if self._is_booking_intent(message.lower()):
             return self._handle_create_booking(
                 tenant_id=request.tenant_id,
                 conversation=conversation,
@@ -182,16 +300,194 @@ class RespondToMessage:
                 action_id=action_id,
             )
 
-        if action_id == "catalog" or self._is_catalog_intent(lower_message):
+        if self._is_catalog_intent(message.lower()):
             return self._render_catalog(request.tenant_id)
 
-        if action_id == "my_bookings" or self._is_list_bookings_intent(lower_message):
+        if self._is_list_bookings_intent(message.lower()):
             return self._render_bookings(request.tenant_id)
 
-        if self._is_greeting_intent(lower_message):
-            return self._render_main_menu()
+        if self._is_greeting_intent(message.lower()):
+            return self._render_main_menu(conversation)
 
         return None
+
+    def _handle_assistant_chat(
+        self,
+        *,
+        request: RespondToMessageRequest,
+        conversation: Conversation,
+        message: str,
+    ) -> ResponsePayload:
+        if message.lower().strip() == "menu":
+            conversation.state.pop("flow", None)
+            conversation.state.pop("step", None)
+            conversation.state.pop("active_options", None)
+            return self._render_main_menu(conversation)
+
+        llm_messages = self._build_llm_messages(
+            conversation=conversation,
+            tenant_id=request.tenant_id,
+            user_message=message,
+        )
+        try:
+            llm_reply = self.llm_client.generate_reply(messages=llm_messages)
+        except InfrastructureError:
+            raise
+        except Exception as exc:
+            raise InfrastructureError(str(exc)) from exc
+        return ResponsePayload(type="text", message=llm_reply)
+
+    def _is_global_back_command(self, message: str, action_id: str | None) -> bool:
+        normalized_message = message.lower().strip()
+        normalized_action = (action_id or "").strip().lower()
+        return normalized_action in {"back", "menu", "home"} or normalized_message in {
+            "volver",
+            "atrás",
+            "atras",
+            "menu",
+            "inicio",
+            "volver al menú",
+        }
+
+    def _handle_global_back(self, conversation: Conversation) -> ResponsePayload:
+        history = conversation.state.get("wizard_history")
+        if not isinstance(history, list) or not history:
+            self._clear_booking_flow_state(conversation)
+            return self._render_main_menu(conversation)
+
+        previous_step = str(history.pop() or "").strip()
+        if not previous_step:
+            self._clear_booking_flow_state(conversation)
+            return self._render_main_menu(conversation)
+
+        conversation.state["wizard_history"] = history
+        conversation.state["suppress_history_push"] = True
+        return self._render_step_from_history(conversation, previous_step)
+
+    def _render_step_from_history(
+        self, conversation: Conversation, step: str
+    ) -> ResponsePayload:
+        draft = self._get_booking_draft(conversation)
+
+        if step == "main_menu":
+            self._clear_booking_flow_state(conversation)
+            return self._render_main_menu(conversation)
+
+        if step == "select_service":
+            services = self.list_services_use_case.execute(
+                ListServicesRequest(tenant_id=conversation.tenant_id)
+            )
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_service",
+                prompt="Perfecto. ¿Qué servicio deseas?",
+                options=[
+                    ResponseOption(
+                        id=str(service.service_id),
+                        label=(
+                            f"{service.name} - ${service.price:.2f} - "
+                            f"{service.duration_minutes} min"
+                        ),
+                    )
+                    for service in services[:10]
+                ],
+                include_back_option=True,
+            )
+
+        if step == "select_date":
+            services = self.list_services_use_case.execute(
+                ListServicesRequest(tenant_id=conversation.tenant_id)
+            )
+            resources = self.list_resources_use_case.execute(
+                ListResourcesRequest(tenant_id=conversation.tenant_id)
+            )
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_date",
+                prompt="Genial.\nSelecciona una fecha:",
+                options=self._build_date_choice_options(
+                    tenant_id=conversation.tenant_id,
+                    draft=draft,
+                    services=services,
+                    resources=resources,
+                ),
+                include_back_option=True,
+            )
+
+        if step == "select_time":
+            services = self.list_services_use_case.execute(
+                ListServicesRequest(tenant_id=conversation.tenant_id)
+            )
+            resources = self.list_resources_use_case.execute(
+                ListResourcesRequest(tenant_id=conversation.tenant_id)
+            )
+            selected_date = self._parse_datetime(draft.get("selected_date", ""))
+            if selected_date is None:
+                selected_date = self._parse_datetime(draft.get("start", ""))
+            slot_options = self._build_available_slot_options(
+                tenant_id=conversation.tenant_id,
+                draft=draft,
+                services=services,
+                resources=resources,
+                selected_date=selected_date,
+            )
+            date_label = self._format_relative_date_label(selected_date)
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_time",
+                prompt=f"Disponibilidad para {date_label.lower()}:",
+                options=slot_options,
+                include_back_option=True,
+            )
+
+        if step == "select_resource":
+            services = self.list_services_use_case.execute(
+                ListServicesRequest(tenant_id=conversation.tenant_id)
+            )
+            resources = self.list_resources_use_case.execute(
+                ListResourcesRequest(tenant_id=conversation.tenant_id)
+            )
+            service_id = self._parse_uuid(draft.get("service_id"))
+            start = self._parse_datetime(draft.get("start", ""))
+            if service_id is None or start is None:
+                return self._render_main_menu(conversation)
+
+            selected_service = self._find_service_by_id(services, service_id)
+            if selected_service is None:
+                return self._render_main_menu(conversation)
+
+            available_resources = self._available_resources_for_slot(
+                tenant_id=conversation.tenant_id,
+                resources=resources,
+                slot_start=start,
+                duration_minutes=selected_service.duration_minutes,
+            )
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_resource",
+                prompt="Hay varios recursos disponibles. Elige uno",
+                options=[
+                    ResponseOption(id=str(item.resource_id), label=item.name)
+                    for item in available_resources[:10]
+                ],
+                include_back_option=True,
+            )
+
+        if step == "confirm_booking":
+            services = self.list_services_use_case.execute(
+                ListServicesRequest(tenant_id=conversation.tenant_id)
+            )
+            resources = self.list_resources_use_case.execute(
+                ListResourcesRequest(tenant_id=conversation.tenant_id)
+            )
+            return self._build_confirmation_payload(
+                conversation=conversation,
+                draft=draft,
+                services=services,
+                resources=resources,
+            )
+
+        return self._render_main_menu(conversation)
 
     def _is_booking_intent(self, lower_message: str) -> bool:
         return any(
@@ -199,7 +495,9 @@ class RespondToMessage:
         )
 
     def _is_cancel_intent(self, lower_message: str) -> bool:
-        return any(keyword in lower_message for keyword in ("cancel", "anul"))
+        return bool(
+            re.search(r"\b(cancelar|cancel|anular|anul)\b", lower_message, re.IGNORECASE)
+        )
 
     def _is_confirm_intent(self, lower_message: str, action_id: str | None) -> bool:
         if action_id in {"confirm", "booking_confirm"}:
@@ -233,15 +531,22 @@ class RespondToMessage:
     def _is_greeting_intent(self, lower_message: str) -> bool:
         return lower_message in {"hola", "buenas", "hello", "hi", "hey"}
 
-    def _render_main_menu(self) -> ResponsePayload:
-        return ResponsePayload(
-            type="options",
-            message="¿En qué puedo ayudarte?",
+    def _is_assistant_intent(self, lower_message: str) -> bool:
+        return any(
+            keyword in lower_message
+            for keyword in ("asistente", "chat", "conversar", "hablar")
+        )
+
+    def _render_main_menu(self, conversation: Conversation) -> ResponsePayload:
+        return self._build_option_payload(
+            conversation=conversation,
+            step="main_menu",
+            prompt="¡Hola! Bienvenida a Nails Studio\n¿En qué puedo ayudarte?",
             options=[
-                ResponseOption(id="catalog", label="Ver servicios"),
                 ResponseOption(id="booking", label="Reservar cita"),
-                ResponseOption(id="my_bookings", label="Mis reservas"),
-                ResponseOption(id="cancel", label="Cancelar reserva"),
+                ResponseOption(id="catalog", label="Ver servicios"),
+                ResponseOption(id="my_bookings", label="Mis citas"),
+                ResponseOption(id=_ASSISTANT_CHAT_OPTION, label="Chatear con asistente"),
             ],
         )
 
@@ -376,6 +681,8 @@ class RespondToMessage:
         current_step = conversation.state.get("step")
         conversation.state["flow"] = "booking"
         draft = self._get_booking_draft(conversation)
+        if not draft["customer_contact"].strip():
+            draft["customer_contact"] = conversation.user_id
         self._merge_booking_draft(
             draft=draft,
             message=message,
@@ -386,38 +693,81 @@ class RespondToMessage:
         )
 
         if not draft["service_id"].strip():
-            conversation.state["step"] = "select_service"
             conversation.state["booking_draft"] = draft
-            return ResponsePayload(
-                type="options",
-                message="Selecciona un servicio",
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_service",
+                prompt="Perfecto. ¿Qué servicio deseas?",
                 options=[
                     ResponseOption(
                         id=str(service.service_id),
-                        label=f"{service.name} ({service.duration_minutes} min)",
+                        label=(
+                            f"{service.name} - ${service.price:.2f} - "
+                            f"{service.duration_minutes} min"
+                        ),
                     )
                     for service in services[:10]
                 ],
+                include_back_option=True,
+            )
+
+        if not draft["start"].strip() and current_step not in {
+            "select_date",
+            "select_datetime",
+            "select_time",
+        }:
+            conversation.state["booking_draft"] = draft
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_date",
+                prompt="Genial.\nSelecciona una fecha:",
+                options=self._build_date_choice_options(
+                    tenant_id=tenant_id,
+                    draft=draft,
+                    services=services,
+                    resources=resources,
+                ),
+                include_back_option=True,
             )
 
         if not draft["start"].strip():
-            conversation.state["step"] = "select_datetime"
             conversation.state["booking_draft"] = draft
+            selected_date = self._resolve_selected_date(
+                message=message,
+                action_id=action_id,
+            )
             slot_options = self._build_available_slot_options(
                 tenant_id=tenant_id,
                 draft=draft,
                 services=services,
                 resources=resources,
+                selected_date=selected_date,
             )
             if slot_options:
-                return ResponsePayload(
-                    type="options",
-                    message="Selecciona un horario",
+                date_label = self._format_relative_date_label(selected_date)
+                return self._build_option_payload(
+                    conversation=conversation,
+                    step="select_time",
+                    prompt=f"Disponibilidad para {date_label.lower()}:",
                     options=slot_options,
+                    include_back_option=True,
+                )
+            conversation.state["step"] = "select_datetime"
+            if action_id == _DATE_OTHER_OPTION:
+                return ResponsePayload(
+                    type="text",
+                    message=(
+                        "Escribe la fecha que prefieres en formato YYYY-MM-DD.\n"
+                        "También puedes escribir 'volver' para regresar al menú."
+                    ),
                 )
             return ResponsePayload(
                 type="text",
-                message="¿Qué día y hora te viene bien? (ej:'mañana a las 10')",
+                message=(
+                    "¿Qué día te viene bien? Puedes escribir 'mañana a las 10' "
+                    "o una fecha YYYY-MM-DD.\n"
+                    "Escribe 'volver' para regresar al menú."
+                ),
             )
 
         service_id = self._parse_uuid(draft["service_id"])
@@ -447,77 +797,110 @@ class RespondToMessage:
 
             if parsed_resource_id is not None:
                 if not any(
-                    item.resource_id == parsed_resource_id for item in available_resources
+                    item.resource_id == parsed_resource_id
+                    for item in available_resources
                 ):
                     draft["resource_id"] = ""
                     conversation.state["step"] = "select_resource"
                     conversation.state["booking_draft"] = draft
                     return ResponsePayload(
                         type="text",
-                        message="Ese recurso no está disponible en ese horario. Elige otro recurso u hora.",
+                        message=(
+                            "Ese recurso no está disponible en ese horario. "
+                            "Elige otro recurso u hora o escribe 'volver'."
+                        ),
                     )
             else:
                 if len(available_resources) == 1:
                     draft["resource_id"] = str(available_resources[0].resource_id)
                 elif len(available_resources) > 1:
-                    conversation.state["step"] = "select_resource"
                     conversation.state["booking_draft"] = draft
-                    return ResponsePayload(
-                        type="options",
-                        message="Hay varios recursos disponibles. Elige uno",
+                    return self._build_option_payload(
+                        conversation=conversation,
+                        step="select_resource",
+                        prompt="Hay varios recursos disponibles. Elige uno",
                         options=[
                             ResponseOption(id=str(item.resource_id), label=item.name)
                             for item in available_resources[:10]
                         ],
+                        include_back_option=True,
                     )
                 else:
                     draft["start"] = ""
-                    conversation.state["step"] = "select_datetime"
                     conversation.state["booking_draft"] = draft
                     slot_options = self._build_available_slot_options(
                         tenant_id=tenant_id,
                         draft=draft,
                         services=services,
                         resources=resources,
+                        selected_date=None,
                     )
                     if slot_options:
-                        return ResponsePayload(
-                            type="options",
-                            message="No hay disponibilidad en ese horario. Elige otra hora",
+                        return self._build_option_payload(
+                            conversation=conversation,
+                            step="select_time",
+                            prompt="No hay disponibilidad en ese horario. Elige otra hora",
                             options=slot_options,
+                            include_back_option=True,
                         )
+                    conversation.state["step"] = "select_datetime"
                     return ResponsePayload(
                         type="text",
-                        message="No hay disponibilidad en ese horario. ¿Qué otra fecha prefieres?",
+                        message=(
+                            "No hay disponibilidad en ese horario. "
+                            "¿Qué otra fecha prefieres? También puedes escribir 'volver'."
+                        ),
                     )
 
         if not draft["customer_name"].strip():
             conversation.state["step"] = "customer_name"
             conversation.state["booking_draft"] = draft
-            return ResponsePayload(type="text", message="Necesito tu nombre")
-
-        if not draft["customer_contact"].strip():
-            conversation.state["step"] = "customer_contact"
-            conversation.state["booking_draft"] = draft
-            return ResponsePayload(type="text", message="Teléfono de contacto")
+            return ResponsePayload(
+                type="text",
+                message="Ahora necesito tu nombre. Escribe 'volver' para regresar al menú.",
+            )
 
         if conversation.state.get("step") != "confirm_booking":
-            conversation.state["step"] = "confirm_booking"
             conversation.state["booking_draft"] = draft
             return self._build_confirmation_payload(
-                draft=draft, services=services, resources=resources
+                conversation=conversation,
+                draft=draft,
+                services=services,
+                resources=resources,
             )
 
         lower_message = message.lower().strip()
-        if self._is_cancel_confirmation_intent(lower_message, action_id):
+        if action_id == _CANCEL_BOOKING_OPTION or self._is_cancel_confirmation_intent(
+            lower_message, action_id
+        ):
             self._clear_booking_flow_state(conversation)
             return ResponsePayload(
                 type="text", message="Reserva cancelada. Si quieres, empezamos otra."
             )
 
+        if action_id == _CHANGE_TIME_OPTION:
+            draft["start"] = ""
+            draft["resource_id"] = ""
+            conversation.state["booking_draft"] = draft
+            return self._build_option_payload(
+                conversation=conversation,
+                step="select_date",
+                prompt="Perfecto. Selecciona una nueva fecha:",
+                options=self._build_date_choice_options(
+                    tenant_id=tenant_id,
+                    draft=draft,
+                    services=services,
+                    resources=resources,
+                ),
+                include_back_option=True,
+            )
+
         if not self._is_confirm_intent(lower_message, action_id):
             return self._build_confirmation_payload(
-                draft=draft, services=services, resources=resources
+                conversation=conversation,
+                draft=draft,
+                services=services,
+                resources=resources,
             )
 
         resource_id = self._parse_uuid(draft["resource_id"])
@@ -551,19 +934,22 @@ class RespondToMessage:
 
         self._clear_booking_flow_state(conversation)
         conversation.state["last_booking_id"] = str(response.booking_id)
-        start_iso = start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-        end_iso = end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         return ResponsePayload(
             type="text",
             message=(
-                f"Reserva confirmada. booking_id={response.booking_id}, "
-                f"estado={response.status}, inicio={start_iso}, fin={end_iso}."
+                "Reserva confirmada.\n\n"
+                f"Fecha: {self._format_human_slot(start)}\n"
+                f"Servicio: {selected_service.name}\n"
+                f"Nombre: {customer_name}\n"
+                "Se enviará un recordatorio 30 min antes para confirmar la cita.\n"
+                f"booking_id={response.booking_id}"
             ),
         )
 
     def _build_confirmation_payload(
         self,
         *,
+        conversation: Conversation,
         draft: dict[str, str],
         services: list[ServiceItem],
         resources: list[ResourceItem],
@@ -585,26 +971,39 @@ class RespondToMessage:
 
         start_label = draft["start"]
         if start is not None:
-            start_label = start.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            start_label = self._format_human_slot(start)
 
-        return ResponsePayload(
-            type="confirmation",
-            message=(
-                "Confirma tu reserva:\n"
-                f"Servicio: {service_label}\n"
-                f"Recurso: {resource_label}\n"
+        price_line = ""
+        for service in services:
+            if service_id is not None and service.service_id == service_id:
+                price_line = f"\nPrecio: ${service.price:.2f}"
+                break
+
+        return self._build_option_payload(
+            conversation=conversation,
+            step="confirm_booking",
+            prompt=(
+                "Gracias.\n\n"
                 f"Fecha: {start_label}\n"
-                f"Nombre: {draft['customer_name']}\n"
-                f"Contacto: {draft['customer_contact']}"
+                f"Servicio: {service_label}{price_line}\n"
+                f"Recurso: {resource_label}\n"
+                f"Nombre: {draft['customer_name']}\n\n"
+                "¿Deseas confirmar tu cita?"
             ),
-            confirm_label="Confirmar",
-            cancel_label="Cancelar",
+            options=[
+                ResponseOption(id=_CONFIRM_BOOKING_OPTION, label="Sí confirmar"),
+                ResponseOption(id=_CHANGE_TIME_OPTION, label="Cambiar horario"),
+                ResponseOption(id=_CANCEL_BOOKING_OPTION, label="Cancelar"),
+            ],
+            include_back_option=True,
         )
 
     def _clear_booking_flow_state(self, conversation: Conversation) -> None:
         conversation.state.pop("flow", None)
         conversation.state.pop("step", None)
         conversation.state.pop("booking_draft", None)
+        conversation.state.pop("active_options", None)
+        conversation.state.pop("wizard_history", None)
 
     def _get_booking_draft(self, conversation: Conversation) -> dict[str, str]:
         current = conversation.state.get("booking_draft")
@@ -615,6 +1014,7 @@ class RespondToMessage:
                 "start": str(current.get("start", "")),
                 "customer_name": str(current.get("customer_name", "")),
                 "customer_contact": str(current.get("customer_contact", "")),
+                "selected_date": str(current.get("selected_date", "")),
             }
         return {
             "service_id": "",
@@ -622,6 +1022,7 @@ class RespondToMessage:
             "start": "",
             "customer_name": "",
             "customer_contact": "",
+            "selected_date": "",
         }
 
     def _merge_booking_draft(
@@ -647,6 +1048,10 @@ class RespondToMessage:
         if resource_id is not None:
             draft["resource_id"] = str(resource_id)
 
+        selected_date = self._resolve_selected_date(message=message, action_id=action_id)
+        if selected_date is not None:
+            draft["selected_date"] = selected_date.isoformat()
+
         start = self._extract_datetime(selection_input)
         if start is None:
             start = self._extract_datetime(message)
@@ -667,8 +1072,6 @@ class RespondToMessage:
         )
         if contact is not None:
             draft["customer_contact"] = contact
-        elif step == "customer_contact" and message.strip():
-            draft["customer_contact"] = message.strip()
 
     def _resolve_service_id(
         self, *, message: str, services: list[ServiceItem]
@@ -768,6 +1171,7 @@ class RespondToMessage:
         draft: dict[str, str],
         services: list[ServiceItem],
         resources: list[ResourceItem],
+        selected_date: datetime | None,
     ) -> list[ResponseOption]:
         service_id = self._parse_uuid(draft.get("service_id"))
         if service_id is None:
@@ -780,10 +1184,15 @@ class RespondToMessage:
         preferred_resource_id = self._parse_uuid(draft.get("resource_id"))
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         duration = timedelta(minutes=selected_service.duration_minutes)
-        candidates: list[datetime] = []
+        candidates: list[tuple[datetime, int]] = []
 
-        for day_offset in range(0, 5):
-            date = (now + timedelta(days=day_offset)).date()
+        dates = [selected_date.date()] if selected_date is not None else []
+        if not dates:
+            dates = [(now + timedelta(days=day_offset)).date() for day_offset in range(0, 5)]
+
+        for date in dates:
+            availability_count = 0
+            slots_for_date: list[datetime] = []
             for hour in range(10, 20):
                 slot_start = datetime(
                     year=date.year,
@@ -806,19 +1215,71 @@ class RespondToMessage:
                     preferred_resource_id=preferred_resource_id,
                 )
                 if available_resources:
-                    candidates.append(slot_start)
-                if len(candidates) >= 3:
-                    break
-            if len(candidates) >= 3:
+                    availability_count += 1
+                    slots_for_date.append(slot_start)
+            if selected_date is not None:
+                candidates.extend((slot, availability_count) for slot in slots_for_date)
                 break
+            if availability_count > 0:
+                best_slot = slots_for_date[0]
+                candidates.append((best_slot, availability_count))
 
-        return [
-            ResponseOption(
-                id=slot.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                label=slot.astimezone(timezone.utc).strftime("%d %b %H:%M"),
+        if selected_date is None:
+            candidates.sort(
+                key=lambda item: (-item[1], item[0].astimezone(timezone.utc))
             )
-            for slot in candidates
+
+        options: list[ResponseOption] = []
+        for slot, availability_count in candidates[:3]:
+            label = slot.astimezone(timezone.utc).strftime("%H:%M")
+            if selected_date is None:
+                label = f"{label} - {availability_count} disponibles"
+            options.append(
+                ResponseOption(
+                    id=slot.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    label=label,
+                )
+            )
+        return options
+
+    def _build_date_choice_options(
+        self,
+        *,
+        tenant_id: str,
+        draft: dict[str, str],
+        services: list[ServiceItem],
+        resources: list[ResourceItem],
+    ) -> list[ResponseOption]:
+        today = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        choices = [
+            (_DATE_TODAY_OPTION, today, "Hoy"),
+            (_DATE_TOMORROW_OPTION, today + timedelta(days=1), "Mañana"),
+            (_DATE_OTHER_OPTION, None, "Elegir otra fecha"),
         ]
+
+        scored_choices: list[tuple[int, ResponseOption]] = []
+        for option_id, date_value, base_label in choices:
+            if option_id == _DATE_OTHER_OPTION:
+                continue
+
+            slot_options = self._build_available_slot_options(
+                tenant_id=tenant_id,
+                draft=draft,
+                services=services,
+                resources=resources,
+                selected_date=date_value,
+            )
+            count = len(slot_options)
+            if count == 0:
+                continue
+            label = f"{base_label} ({count} disponibles)"
+            scored_choices.append((count, ResponseOption(id=option_id, label=label)))
+
+        scored_choices.sort(key=lambda item: (-item[0], item[1].id))
+        options = [item[1] for item in scored_choices]
+        if not options:
+            options.append(ResponseOption(id=_DATE_OTHER_OPTION, label="Elegir otra fecha"))
+        return options
 
     def _available_resources_for_slot(
         self,
@@ -897,3 +1358,97 @@ class RespondToMessage:
 
     def _normalize_text(self, value: str) -> str:
         return " ".join(value.lower().split())
+
+    def _build_option_payload(
+        self,
+        *,
+        conversation: Conversation,
+        step: str,
+        prompt: str,
+        options: list[ResponseOption],
+        include_back_option: bool = False,
+    ) -> ResponsePayload:
+        rendered_options = list(options)
+        if include_back_option:
+            rendered_options.append(ResponseOption(id=_BACK_OPTION, label="Volver"))
+
+        history = conversation.state.get("wizard_history")
+        if not isinstance(history, list):
+            history = []
+        if not conversation.state.pop("suppress_history_push", False):
+            current_step = conversation.state.get("step")
+            if isinstance(current_step, str) and current_step:
+                history = list(history)
+                if not history or history[-1] != current_step:
+                    history.append(current_step)
+        conversation.state["wizard_history"] = history
+        conversation.state["step"] = step
+        conversation.state["active_options"] = {
+            "step": step,
+            "map": {
+                str(index): option.id
+                for index, option in enumerate(rendered_options, start=1)
+            },
+        }
+        return ResponsePayload(
+            type="options",
+            message=prompt,
+            options=rendered_options,
+        )
+
+    def _resolve_selected_value(
+        self,
+        *,
+        conversation: Conversation,
+        message: str,
+        action_id: str | None,
+    ) -> str:
+        if action_id:
+            return action_id.strip()
+
+        active_options = conversation.state.get("active_options")
+        if not isinstance(active_options, dict):
+            return message.strip()
+
+        option_map = active_options.get("map")
+        if not isinstance(option_map, dict):
+            return message.strip()
+
+        return str(option_map.get(message.strip(), message.strip()))
+
+    def _resolve_selected_date(
+        self, *, message: str, action_id: str | None
+    ) -> datetime | None:
+        normalized = (action_id or message).strip().lower()
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        if normalized == _DATE_TODAY_OPTION:
+            return now
+        if normalized == _DATE_TOMORROW_OPTION:
+            return now + timedelta(days=1)
+        if normalized == _DATE_OTHER_OPTION:
+            return None
+
+        parsed = self._parse_datetime(message)
+        if parsed is not None:
+            return parsed
+
+        raw = message.strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+            return self._parse_datetime(f"{raw}T09:00:00Z")
+        return None
+
+    def _format_relative_date_label(self, value: datetime | None) -> str:
+        if value is None:
+            return "la fecha seleccionada"
+        today = datetime.now(timezone.utc).date()
+        if value.date() == today:
+            return "Hoy"
+        if value.date() == today + timedelta(days=1):
+            return "Mañana"
+        return value.strftime("%Y-%m-%d")
+
+    def _format_human_slot(self, value: datetime) -> str:
+        return (
+            f"{self._format_relative_date_label(value)} "
+            f"{value.astimezone(timezone.utc).strftime('%H:%M')}"
+        )

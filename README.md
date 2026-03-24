@@ -82,8 +82,8 @@ Ejemplo de payload estructurado:
     "message": "¿En qué puedo ayudarte?",
     "text": "¿En qué puedo ayudarte?",
     "options": [
-      {"id": "catalog", "label": "Ver servicios"},
-      {"id": "booking", "label": "Reservar cita"}
+      { "id": "catalog", "label": "Ver servicios" },
+      { "id": "booking", "label": "Reservar cita" }
     ]
   }
 }
